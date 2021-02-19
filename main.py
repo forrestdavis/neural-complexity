@@ -7,12 +7,16 @@ from __future__ import print_function
 import argparse
 import time
 import math
+import dill
 import sys
+import os
 import warnings
 import torch
 import torch.nn as nn
+import numpy as np
 import data
 import model
+from similarity_loss import WeightedCrossEntropyLoss
 
 try:
     from progress.bar import Bar
@@ -64,6 +68,9 @@ parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--init', type=float, default=None,
                     help='-1 to randomly Initialize. Otherwise, all parameter weights set to value')
+parser.add_argument('--loss', type=str, default='cross_entropy',
+                    choices=['cross_entropy', 'similarity'],
+                    help='loss function to use')
 
 # Data parameters
 parser.add_argument('--model_file', type=str, default='model.pt',
@@ -216,7 +223,12 @@ corpus = data.SentenceCorpus(args.data_dir, args.vocab_file, args.test, args.int
                              lower_flag=args.lowercase,
                              trainfname=args.trainfname,
                              validfname=args.validfname,
-                             testfname=args.testfname)
+                             testfname=args.testfname, 
+                             embeddingfname='embeddings/word2vec.pkl',
+                             fasttext_loc='embeddings/wiki-news-300d-1M.vec',
+                             allowOOV=False
+                             )
+
 
 if not args.interact:
     if args.test:
@@ -243,10 +255,24 @@ if not args.test and not args.interact:
                 model = torch.load(f, map_location='cpu')
     else:
         ntokens = len(corpus.dictionary)
-        model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
-                               args.nlayers, embedding_file=args.embedding_file,
-                               dropout=args.dropout, tie_weights=args.tied,
-                               freeze_embedding=args.freeze_embedding).to(device)
+        #if i've already loaded embeddings let's just use that
+        if corpus.dictionary.embeddings is not None:
+            if not args.freeze_embedding:
+                args.freeze_embedding = True
+                sys.stderr.write('WARNING: You did not use --freeze_embedding.'\
+                        +' You have pretrained embeddings that are trying '\
+                        +'to be used. To prevent overriding them this flag '\
+                        +'has been overriden.\n')
+            model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
+                                   args.nlayers, embedding_file=args.embedding_file,
+                                   dropout=args.dropout, tie_weights=args.tied,
+                                   freeze_embedding=args.freeze_embedding, embeddings=corpus.dictionary.embeddings).to(device)
+
+        else:
+            model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
+                                   args.nlayers, embedding_file=args.embedding_file,
+                                   dropout=args.dropout, tie_weights=args.tied,
+                                   freeze_embedding=args.freeze_embedding).to(device)
 
     if args.cuda and (not args.single) and (torch.cuda.device_count() > 1):
         # If applicable, use multi-gpu for training
@@ -259,7 +285,60 @@ if not args.test and not args.interact:
     # this makes them a continuous chunk, and will speed up forward pass
     model.rnn.flatten_parameters()
 
-criterion = nn.CrossEntropyLoss()
+###############################################################################
+# Set Loss
+###############################################################################
+
+if args.loss == 'cross_entropy':
+    criterion = nn.CrossEntropyLoss()
+
+if args.loss == 'similarity':
+
+    assert len(corpus.dictionary.embeddings) != 0, "You don't have embeddings for your vocab"
+
+    #get pairwise similarities
+    dim = len(corpus.dictionary.embeddings[0])
+    similarity_loc = 'embeddings/wikitext2_similarities.pkl'
+    clip = True
+    topN = 0
+    stopwords = True
+    normalize = True
+
+    EMBEDDINGS = torch.tensor(corpus.dictionary.embeddings).float()
+    if os.path.exists(similarity_loc):
+        sys.stderr.write('Getting existing similarities...\n')
+        with open(similarity_loc, 'rb') as f:
+            similarities = dill.load(f)
+    else:
+        sys.stderr.write('Getting new similarities...\n')
+        similarities = []
+
+        if PROGRESS:
+            bar = Bar('Processing Similarity', max = len(corpus.dictionary.embeddings))
+
+        for i in range(EMBEDDINGS.shape[0]):
+            sims = torch.nn.functional.cosine_similarity(EMBEDDINGS[i].expand_as(EMBEDDINGS), EMBEDDINGS)
+            if clip:
+                torch.nn.functional.relu(sims, inplace=True)
+
+            #if topN:
+
+            if normalize:
+                norm_factor = torch.sum(sims)
+            else:
+                norm_factor = 1
+
+            sims = sims/norm_factor
+            similarities.append(sims)
+                    
+            if PROGRESS:
+                bar.next()
+
+        with open(similarity_loc, 'wb') as f:
+            dill.dump(similarities, f)
+
+    #Get loss
+    criterion = WeightedCrossEntropyLoss(EMBEDDINGS, device, similarities)
 
 ###############################################################################
 # Complexity measures
@@ -482,6 +561,7 @@ def test_evaluate(test_sentences, data_source):
             except RuntimeError:
                 print("Vocabulary Error! Most likely there weren't unks in training and unks are now needed for testing")
                 raise
+
             loss = criterion(output_flat, targets)
             total_loss += loss.item()
             if args.words:
@@ -561,10 +641,17 @@ def train():
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
+
+            #to catch huge loss from semantic similarity loss which causes initial overflow problems
+            try: 
+                ppl = math.exp(cur_loss)
+            except OverflowError:
+                ppl = float('inf')
+
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
                   'loss {:5.2f} | ppl {:8.2f}'.format(
                       epoch, batch, len(train_data) // args.bptt, lr,
-                      elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
+                      elapsed * 1000 / args.log_interval, cur_loss, ppl))
             total_loss = 0.
             start_time = time.time()
 
@@ -580,10 +667,17 @@ if not args.test and not args.interact:
             epoch_start_time = time.time()
             train()
             val_loss = evaluate(val_data)
+
+            #to catch huge loss from semantic similarity loss which causes initial overflow problems
+            try: 
+                ppl = math.exp(val_loss)
+            except OverflowError:
+                ppl = float('inf')
+
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | lr: {:4.8f} | '
                   'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                             lr, math.exp(val_loss)))
+                                             lr, ppl))
             print('-' * 89)
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:
@@ -668,7 +762,12 @@ else:
             with open(args.adapted_model, 'wb') as f:
                 torch.save(model, f)
     if not args.interact and not args.nopp:
+        #to catch huge loss from semantic similarity loss which causes initial overflow problems
+        try: 
+            ppl = math.exp(test_loss)
+        except OverflowError:
+            ppl = float('inf')
         print('=' * 89)
         print('| End of testing | test loss {:5.2f} | test ppl {:8.2f}'.format(
-            test_loss, math.exp(test_loss)))
+            test_loss, ppl))
         print('=' * 89)
