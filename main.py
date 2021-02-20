@@ -296,13 +296,22 @@ if args.loss == 'similarity':
 
     assert len(corpus.dictionary.embeddings) != 0, "You don't have embeddings for your vocab"
 
+
     #get pairwise similarities
     dim = len(corpus.dictionary.embeddings[0])
     similarity_loc = 'embeddings/wikitext2_similarities.pkl'
     clip = True
-    topN = 0
+    N = 10
     stopwords = True
     normalize = True
+
+    stop_idx = []
+
+    if stopwords:
+        #load stopwords
+        with open('stopwords.txt', 'r') as f:
+            stop_words = f.read().splitlines()
+        stop_idx = [corpus.dictionary.word2idx[w] for w in stop_words if w in corpus.dictionary.word2idx]
 
     EMBEDDINGS = torch.tensor(corpus.dictionary.embeddings).float()
     if os.path.exists(similarity_loc):
@@ -317,19 +326,35 @@ if args.loss == 'similarity':
             bar = Bar('Processing Similarity', max = len(corpus.dictionary.embeddings))
 
         for i in range(EMBEDDINGS.shape[0]):
-            sims = torch.nn.functional.cosine_similarity(EMBEDDINGS[i].expand_as(EMBEDDINGS), EMBEDDINGS)
-            if clip:
-                torch.nn.functional.relu(sims, inplace=True)
+            
+            target = torch.zeros(EMBEDDINGS.shape[0])
+            #if in stop words let's do cross-entropy loss
+            if i in stop_idx:
+                target[i] = 1
 
-            #if topN:
-
-            if normalize:
-                norm_factor = torch.sum(sims)
             else:
-                norm_factor = 1
 
-            sims = sims/norm_factor
-            similarities.append(sims)
+                sims = torch.nn.functional.cosine_similarity(EMBEDDINGS[i].expand_as(EMBEDDINGS), EMBEDDINGS)
+                if clip:
+                    torch.nn.functional.relu(sims, inplace=True)
+
+                sims, indices = torch.sort(sims, descending=True)
+                top_indices = indices[:N]
+                sims = sims[:N]
+
+                if normalize:
+                    norm_factor = torch.sum(sims)
+                else:
+                    norm_factor = 1
+
+                #Normalize
+                sims = sims/norm_factor
+                #so we will set all values of similarities to zero except those
+                #that we are including in the top N
+                for w_i, t_idx in enumerate(top_indices):
+                    target[t_idx] = sims[w_i]
+
+            similarities.append(target)
                     
             if PROGRESS:
                 bar.next()
@@ -531,6 +556,7 @@ def test_evaluate(test_sentences, data_source):
                 output, hidden = model(word_input, hidden)
                 output_flat = output.view(-1, ntokens)
                 loss = criterion(output_flat, target)
+                sys.exit(1)
                 total_loss += loss.item()
                 input_word = corpus.dictionary.idx2word[int(word_input.data)]
                 targ_word = corpus.dictionary.idx2word[int(target.data)]
