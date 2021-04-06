@@ -8,12 +8,16 @@ class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
     def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers,
-                 embedding_file=None, dropout=0.5, tie_weights=False, freeze_embedding=False):
+                 embedding_file=None, dropout=0.5, tie_weights=False, freeze_embedding=False, 
+                 embeddings=None):
         super(RNNModel, self).__init__()
         self.drop = nn.Dropout(dropout)
         if embedding_file:
             # Use pre-trained embeddings
             embed_weights = self.load_embeddings(embedding_file, ntoken, ninp)
+            self.encoder = nn.Embedding.from_pretrained(embed_weights)
+        elif embeddings is not None:
+            embed_weights = torch.tensor(embeddings).float()
             self.encoder = nn.Embedding.from_pretrained(embed_weights)
         else:
             self.encoder = nn.Embedding(ntoken, ninp)
@@ -73,10 +77,16 @@ class RNNModel(nn.Module):
 
     def load_embeddings(self, embedding_file, ntoken, ninp):
         """ Load pre-trained embedding weights """
+        print(ntoken, ninp)
         weights = np.empty((ntoken, ninp))
+        print(weights.shape)
+        print(embedding_file)
         with open(embedding_file, 'r') as in_file:
             ctr = 0
             for line in in_file:
+                #print(ctr)
+                if ctr == ntoken:
+                    print(line)
                 weights[ctr, :] = np.array([float(w) for w in line.strip().split()[1:]])
                 ctr += 1
         return(torch.tensor(weights).float())
