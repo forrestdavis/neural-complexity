@@ -224,7 +224,7 @@ corpus = data.SentenceCorpus(args.data_dir, args.vocab_file, args.test, args.int
                              trainfname=args.trainfname,
                              validfname=args.validfname,
                              testfname=args.testfname, 
-                             embeddingfname='embeddings/wikitext2vec.pkl',
+                             embeddingfname='embeddings/wikitext103_2vec.pkl',
                              fasttext_loc='embeddings/wiki-news-300d-1M.vec',
                              allowOOV=False
                              )
@@ -302,8 +302,8 @@ if args.loss == 'similarity':
 
     #get pairwise similarities
     dim = len(corpus.dictionary.embeddings[0])
-    similarity_loc = 'embeddings/wikitext2_similarities.pkl'
-    #similarity_loc = 'embeddings/wikitext_103_similarities.pkl'
+    #similarity_loc = 'embeddings/wikitext2_similarities.pkl'
+    similarity_loc = 'embeddings/wikitext_103_similarities.pkl'
     clip = True
     N = 10
     stopwords = True
