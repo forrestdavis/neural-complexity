@@ -224,12 +224,13 @@ corpus = data.SentenceCorpus(args.data_dir, args.vocab_file, args.test, args.int
                              trainfname=args.trainfname,
                              validfname=args.validfname,
                              testfname=args.testfname, 
-                             embeddingfname='embeddings/word2vec.pkl',
+                             embeddingfname='embeddings/wikitext2vec.pkl',
                              fasttext_loc='embeddings/wiki-news-300d-1M.vec',
                              allowOOV=False
                              )
 
 
+sys.exit(1)
 if not args.interact:
     if args.test:
         if args.multisentence_test:
@@ -299,7 +300,8 @@ if args.loss == 'similarity':
 
     #get pairwise similarities
     dim = len(corpus.dictionary.embeddings[0])
-    similarity_loc = 'embeddings/wikitext2_similarities.pkl'
+    #similarity_loc = 'embeddings/wikitext2_similarities.pkl'
+    similarity_loc = 'embeddings/wikitext_103_similarities.pkl'
     clip = True
     N = 10
     stopwords = True
@@ -364,6 +366,7 @@ if args.loss == 'similarity':
 
     #Get loss
     criterion = WeightedCrossEntropyLoss(EMBEDDINGS, device, similarities)
+
 
 ###############################################################################
 # Complexity measures

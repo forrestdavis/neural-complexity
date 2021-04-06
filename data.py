@@ -102,7 +102,7 @@ class Dictionary(object):
                     sys.exit(1)
         self.embeddings = np.stack(embeddings)
 
-    def add_word(self, word):
+    def add_word(self, word, maxVocab=50000):
         """ Adds a new obs to the dictionary if needed """
 
         #if i can't make up embeddings and I'm using embeddings I need to 
@@ -112,8 +112,14 @@ class Dictionary(object):
                 word = '<unk>'
 
         if word not in self.word2idx:
-            self.idx2word.append(word)
-            self.word2idx[word] = len(self.idx2word) - 1
+
+            if len(self.idx2word) > maxVocab:
+                word = '<unk>'
+
+            else:
+                self.idx2word.append(word)
+                self.word2idx[word] = len(self.idx2word) - 1
+
         return self.word2idx[word]
 
     def __len__(self):
@@ -136,6 +142,7 @@ class SentenceCorpus(object):
             # training mode
             self.dictionary = Dictionary(embeddingfname, fasttext_loc, allowOOV)
             self.train = self.tokenize(os.path.join(path, trainfname))
+            print('after train the len is', len(self.dictionary))
             self.valid = self.tokenize_with_unks(os.path.join(path, validfname))
             try:
                 # don't require a test set at train time,
