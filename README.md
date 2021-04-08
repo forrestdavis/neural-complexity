@@ -35,6 +35,10 @@ To freeze the weights of the adaptive model and evaluate it on `heldout_set.txt`
 
     time python main.py --model_file 'adapted_model.pt' --vocab_file 'wiki_2_vocab.txt' --cuda --data_dir './data/adaptivecorpus/' --testfname 'heldout_set.txt' --test --words > FILENAME.OUTPUT
 
+### Quick Usage (Language Modeling with Similarity Loss)
+
+time python main.py --model_file 'wiki_103_model_similarity.pt' --vocab_file 'wikitext_103_vocab' --tied --cuda --data_dir './wikitext-103/' --trainfname 'wiki.train.tokens' --validfname 'wiki.valid.tokens' --epochs 2  --loss similarity --emsize 300 --nhid 300 --seed 23 --embedding_file 'embeddings_wikitext_103_vocab' --similarity_file 'embeddings/full_wikitext_103_similarities.pkl'
+
 ## Features
 * Outputs incremental word-by-word information-theoretic complexity estimates (i.e. surprisal, entropy, entropy reduction) if the runtime command `--words` is given.
 * Can function as an [adaptive language model](http://aclweb.org/anthology/D18-1499) if the runtime command `--adapt` is given (van Schijndel and Linzen, 2018). [Complete replication instructions](https://github.com/vansky/replications/blob/master/vanschijndel_linzen-2018-emnlp/vanschijndel_linzen-2018-emnlp-replication.md)
