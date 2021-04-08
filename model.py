@@ -77,17 +77,14 @@ class RNNModel(nn.Module):
 
     def load_embeddings(self, embedding_file, ntoken, ninp):
         """ Load pre-trained embedding weights """
-        print(ntoken, ninp)
         weights = np.empty((ntoken, ninp))
-        print(weights.shape)
-        print(embedding_file)
         with open(embedding_file, 'r') as in_file:
             ctr = 0
             for line in in_file:
-                #print(ctr)
-                if ctr == ntoken:
-                    print(line)
-                weights[ctr, :] = np.array([float(w) for w in line.strip().split()[1:]])
+                try:
+                    weights[ctr, :] = np.array([float(w) for w in line.strip().split()[1:]])
+                except:
+                    weights[ctr, :] = np.array([float(w) for w in line.strip().split()])
                 ctr += 1
         return(torch.tensor(weights).float())
 

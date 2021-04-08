@@ -165,6 +165,9 @@ class SentenceCorpus(object):
             else:
                 self.dictionary = Dictionary(embeddingfname, fasttext_loc, allowOOV)
                 self.load_dict(vocab_file)
+                if not os.path.exists('embeddings_'+vocab_file):
+                    self.dictionary.match_embeddings()
+                    self.save_dict(vocab_file)
             if test_flag:
                 # test mode
                 if multisentence_test_flag:
@@ -197,7 +200,7 @@ class SentenceCorpus(object):
                     for embed in self.dictionary.embeddings:
                         f.write(' '.join(list(map(lambda x: str(x), embed)))+'\n')
 
-    def load_dict(self, path):
+    def load_dict(self, path, loadEmbedding=False):
         """ Loads dictionary from disk """
         assert os.path.exists(path), "Bad path: %s" % path
         if path[-3:] == 'bin':
@@ -216,7 +219,7 @@ class SentenceCorpus(object):
                 for line in file_handle:
                     self.dictionary.add_word(line.strip())
             #if embeddings exists let's load those too
-            if self.dictionary.w2vec is not None:
+            if self.dictionary.w2vec is not None and os.path.exists('embeddings_'+path) and loadEmbedding:
                 with open('embeddings_'+path, 'r') as f:
                     for line in f:
                         line = line.strip().split()

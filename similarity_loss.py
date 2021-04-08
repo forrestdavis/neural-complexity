@@ -16,7 +16,7 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
         embeddings (torch.FloatTensor): pre-trained word embeddings
         device: device to use
     """
-    def __init__(self, embeddings, device, similarities=None):
+    def __init__(self, device, similarities=None, embeddings=None):
         super().__init__()
 
         #not using presaved
