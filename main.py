@@ -68,9 +68,21 @@ parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--init', type=float, default=None,
                     help='-1 to randomly Initialize. Otherwise, all parameter weights set to value')
+
+# Loss parameters 
 parser.add_argument('--loss', type=str, default='cross_entropy',
                     choices=['cross_entropy', 'similarity'],
                     help='loss function to use')
+parser.add_argument('--similarity_file', type=str, default=None,
+                    help='path to pre-compiled similarities')
+parser.add_argument('--neg_sim', action='store_true', 
+                    help='include negative similarities')
+parser.add_argument('--stopword_sim', action='store_false', 
+                    help='include stopword similarities')
+parser.add_argument('--normalize_sim', action='store_true', 
+                    help='normalize similarities')
+parser.add_argument('--N_sim', type=int, default=10, 
+                    help='similarity cohort size')
 
 # Data parameters
 parser.add_argument('--model_file', type=str, default='model.pt',
@@ -83,8 +95,6 @@ parser.add_argument('--vocab_file', type=str, default='vocab.txt',
                     help='path to save the vocab file')
 parser.add_argument('--embedding_file', type=str, default=None,
                     help='path to pre-trained embeddings')
-parser.add_argument('--similarity_file', type=str, default=None,
-                    help='path to pre-compiled similarities')
 parser.add_argument('--trainfname', type=str, default='train.txt',
                     help='name of the training file')
 parser.add_argument('--validfname', type=str, default='valid.txt',
@@ -105,7 +115,6 @@ parser.add_argument('--single', action='store_true',
                     help='use only a single GPU (even if more are available)')
 parser.add_argument('--multisentence_test', action='store_true',
                     help='treat multiple sentences as a single stream at test time')
-
 parser.add_argument('--adapt', action='store_true',
                     help='adapt model weights during evaluation')
 parser.add_argument('--interact', action='store_true',
@@ -328,31 +337,30 @@ if args.loss == 'similarity':
         similarities = dill.load(f)
 
     #Apply filters
-    clip = False
-    N = 10
-    stopwords = True
-    normalize = True
-    
+    print('neg_sim', args.neg_sim)
+    print('stopword_sim', args.stopword_sim)
+    print('normalize_sim', args.normalize_sim)
+    print('N_sim', args.N_sim)
+
     stop_idx = []
-    if stopwords:
+    if args.stopword_sim:
         #load stopwords
         with open('stopwords.txt', 'r') as f:
             stop_words = f.read().splitlines()
         stop_idx = [corpus.dictionary.word2idx[w] for w in stop_words if w in corpus.dictionary.word2idx]
 
-    if clip:
-        torch.nn.fucntional.relu(similarities, inplace=True)
-
     for i in range(len(similarities)):
+        if not args.neg_sim:
+            torch.nn.functional.relu(similarities[i], inplace=True)
         mask = torch.zeros(similarities[i].shape, dtype=torch.uint8).to(device)
         if i in stop_idx:
             mask[i] = 1
         else:
-            topN = torch.topk(similarities[i], N)
+            topN = torch.topk(similarities[i], args.N_sim)
             mask.scatter_(0, topN.indices.to(device), 1)
         mask = mask.bool()
         similarities[i][~mask] = 0
-        if normalize:
+        if args.normalize_sim:
             similarities[i] = similarities[i]/torch.sum(similarities[i])
 
     #Get loss
