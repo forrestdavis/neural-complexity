@@ -165,7 +165,7 @@ class SentenceCorpus(object):
             else:
                 self.dictionary = Dictionary(embeddingfname, fasttext_loc, allowOOV)
                 self.load_dict(vocab_file)
-                if not os.path.exists('embeddings_'+vocab_file):
+                if not os.path.exists('embeddings_'+vocab_file) and not interact_flag:
                     self.dictionary.match_embeddings()
                     self.save_dict(vocab_file)
             if test_flag:
@@ -483,6 +483,40 @@ class SentenceCorpus(object):
                         ids = self.convert_to_ids(words)
                         all_ids.append(ids)
         return (sents, all_ids)
+
+    def encode(self, line, add_space_before_punct_symbol=False, lower=True):
+
+        if lower:
+            line = line.lower()
+
+        if add_space_before_punct_symbol:
+            punct = "!\"#$%&'()*+, -./:;<=>?@[\]^_`{|}~"
+            #add space before punct
+            line = line.translate(str.maketrans({key: " {0}".format(key) for key in punct}))
+            #remove double spaces
+            line = re.sub('\s{2,}', ' ', line)
+
+        sentences = sent_tokenize(line)
+        output = []
+        for x, sent in enumerate(sentences):
+            sent = sent.split(' ')
+            if x == 0:
+                sent = ['<eos>'] + sent
+
+            #imagine we add a word is this really a sentence
+            #If it's a sentence then sent_tokenize will 
+            #generate two sentences
+            #A bit hacky but it helps in parity with huggingface
+            test_sent = ' '.join(sent + ['the'])
+            if len(sent_tokenize(test_sent)) != 1:
+                sent = sent + ['<eos>']
+
+            output += list(self.convert_to_ids(sent).data.numpy())
+        return output
+
+    def decode(self, ids):
+        words = list(map(lambda x: self.dictionary.idx2word[x], ids))
+        return words
 
     def online_tokenize_with_unks(self, line):
         """ Tokenizes an input sentence, adding unks if needed. """
