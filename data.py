@@ -6,38 +6,12 @@ import sys
 import torch
 import numpy as np
 import dill
-<<<<<<< HEAD
-=======
 import re
->>>>>>> sim
 
 re_sentend = re.compile(r'(?<!\b[A-Z]\.)(?<!\b[Mm]rs\.)(?<!\b[MmDdSsJj]r\.)(?<=[\.\?\!])[ \n\t](?!["\'])|(?<!\b[A-Z]\.)(?<!\b[Mm]rs\.)(?<!\b[MmDdSsJj]r\.)(?<=[\.\?\!] ["\'])[ \n\t]+')
 
 def sent_tokenize(instr):
     return(re.split(re_sentend,instr))
-
-def match_embeddings(idx2w, w2vec, dim, bigram=False):
-    embeddings = []
-    voc_size = len(idx2w)
-    print("Matching embeddings to vocabulary ids...")
-
-    for idx in range(voc_size):
-        word = idx2w[idx]
-
-        #map unk and eos appropriately
-        if word == "<unk>":
-            word = 'unk'
-        if word == '<eos>':
-            word = 'eos'
-
-        #if word not in embeddings make random
-        if word not in w2vec:
-            embeddings.append(np.random.uniform(low=-1.2, high=1.2, size=(dim,)))
-        else:
-            embeddings.append(w2vec[word])
-
-    embeddings = np.stack(embeddings)
-    return embeddings
 
 def match_embeddings(idx2w, w2vec, dim, bigram=False):
     embeddings = []
@@ -102,7 +76,6 @@ class Dictionary(object):
                         token = '<unk>'
                     if token == 'eos':
                         token = '<eos>'
-<<<<<<< HEAD
 
                     vector = np.array(items[1:]).astype(float)
                     w2vec[token] = vector
@@ -118,23 +91,6 @@ class Dictionary(object):
 
         embeddings = []
 
-=======
-
-                    vector = np.array(items[1:]).astype(float)
-                    w2vec[token] = vector
-            with open(w2vec_loc, 'wb') as f:
-                dill.dump(w2vec, f)
-        
-        return w2vec
-
-    def match_embeddings(self):
-        voc_size = len(self.idx2word)
-        embed_dim = len(list(self.w2vec.values())[0])
-        sys.stderr.write("Matching embeddings to vocabulary ids...\n")
-
-        embeddings = []
-
->>>>>>> sim
         for idx in range(voc_size):
             word = self.idx2word[idx]
             if self.allowOOV and word not in self.w2vec:
@@ -263,11 +219,7 @@ class SentenceCorpus(object):
                 for line in file_handle:
                     self.dictionary.add_word(line.strip())
             #if embeddings exists let's load those too
-<<<<<<< HEAD
-            if self.dictionary.w2vec is not None:
-=======
             if self.dictionary.w2vec is not None and os.path.exists('embeddings_'+path) and loadEmbedding:
->>>>>>> sim
                 with open('embeddings_'+path, 'r') as f:
                     for line in f:
                         line = line.strip().split()
