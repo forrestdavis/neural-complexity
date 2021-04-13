@@ -6,8 +6,38 @@ import sys
 import torch
 import numpy as np
 import dill
+<<<<<<< HEAD
+=======
+import re
+>>>>>>> sim
 
-from nltk import sent_tokenize
+re_sentend = re.compile(r'(?<!\b[A-Z]\.)(?<!\b[Mm]rs\.)(?<!\b[MmDdSsJj]r\.)(?<=[\.\?\!])[ \n\t](?!["\'])|(?<!\b[A-Z]\.)(?<!\b[Mm]rs\.)(?<!\b[MmDdSsJj]r\.)(?<=[\.\?\!] ["\'])[ \n\t]+')
+
+def sent_tokenize(instr):
+    return(re.split(re_sentend,instr))
+
+def match_embeddings(idx2w, w2vec, dim, bigram=False):
+    embeddings = []
+    voc_size = len(idx2w)
+    print("Matching embeddings to vocabulary ids...")
+
+    for idx in range(voc_size):
+        word = idx2w[idx]
+
+        #map unk and eos appropriately
+        if word == "<unk>":
+            word = 'unk'
+        if word == '<eos>':
+            word = 'eos'
+
+        #if word not in embeddings make random
+        if word not in w2vec:
+            embeddings.append(np.random.uniform(low=-1.2, high=1.2, size=(dim,)))
+        else:
+            embeddings.append(w2vec[word])
+
+    embeddings = np.stack(embeddings)
+    return embeddings
 
 def match_embeddings(idx2w, w2vec, dim, bigram=False):
     embeddings = []
@@ -72,6 +102,7 @@ class Dictionary(object):
                         token = '<unk>'
                     if token == 'eos':
                         token = '<eos>'
+<<<<<<< HEAD
 
                     vector = np.array(items[1:]).astype(float)
                     w2vec[token] = vector
@@ -87,6 +118,23 @@ class Dictionary(object):
 
         embeddings = []
 
+=======
+
+                    vector = np.array(items[1:]).astype(float)
+                    w2vec[token] = vector
+            with open(w2vec_loc, 'wb') as f:
+                dill.dump(w2vec, f)
+        
+        return w2vec
+
+    def match_embeddings(self):
+        voc_size = len(self.idx2word)
+        embed_dim = len(list(self.w2vec.values())[0])
+        sys.stderr.write("Matching embeddings to vocabulary ids...\n")
+
+        embeddings = []
+
+>>>>>>> sim
         for idx in range(voc_size):
             word = self.idx2word[idx]
             if self.allowOOV and word not in self.w2vec:
@@ -161,6 +209,9 @@ class SentenceCorpus(object):
             else:
                 self.dictionary = Dictionary(embeddingfname, fasttext_loc, allowOOV)
                 self.load_dict(vocab_file)
+                if not os.path.exists('embeddings_'+vocab_file) and not interact_flag:
+                    self.dictionary.match_embeddings()
+                    self.save_dict(vocab_file)
             if test_flag:
                 # test mode
                 if multisentence_test_flag:
@@ -193,7 +244,7 @@ class SentenceCorpus(object):
                     for embed in self.dictionary.embeddings:
                         f.write(' '.join(list(map(lambda x: str(x), embed)))+'\n')
 
-    def load_dict(self, path):
+    def load_dict(self, path, loadEmbedding=False):
         """ Loads dictionary from disk """
         assert os.path.exists(path), "Bad path: %s" % path
         if path[-3:] == 'bin':
@@ -212,7 +263,11 @@ class SentenceCorpus(object):
                 for line in file_handle:
                     self.dictionary.add_word(line.strip())
             #if embeddings exists let's load those too
+<<<<<<< HEAD
             if self.dictionary.w2vec is not None:
+=======
+            if self.dictionary.w2vec is not None and os.path.exists('embeddings_'+path) and loadEmbedding:
+>>>>>>> sim
                 with open('embeddings_'+path, 'r') as f:
                     for line in f:
                         line = line.strip().split()
@@ -253,7 +308,7 @@ class SentenceCorpus(object):
 
             # Tokenize file content
             with gzip.open(path, 'rb') as file_handle:
-                ids = torch.LongTensor(tokens)
+                ids = torch.IntTensor(tokens)
                 token = 0
                 first_flag = True
                 for fchunk in file_handle.readlines():
@@ -310,7 +365,7 @@ class SentenceCorpus(object):
 
             # Tokenize file content
             with open(path, 'r') as file_handle:
-                ids = torch.LongTensor(tokens)
+                ids = torch.IntTensor(tokens)
                 token = 0
                 first_flag = True
                 for fchunk in file_handle:
@@ -361,7 +416,7 @@ class SentenceCorpus(object):
 
             # Tokenize file content
             with gzip.open(path, 'rb') as file_handle:
-                ids = torch.LongTensor(tokens)
+                ids = torch.IntTensor(tokens)
                 token = 0
                 first_flag = True
                 for fchunk in file_handle.readlines():
@@ -413,7 +468,7 @@ class SentenceCorpus(object):
 
             # Tokenize file content
             with open(path, 'r') as file_handle:
-                ids = torch.LongTensor(tokens)
+                ids = torch.IntTensor(tokens)
                 token = 0
                 first_flag = True
                 for fchunk in file_handle:
@@ -477,6 +532,40 @@ class SentenceCorpus(object):
                         all_ids.append(ids)
         return (sents, all_ids)
 
+    def encode(self, line, add_space_before_punct_symbol=False, lower=True):
+
+        if lower:
+            line = line.lower()
+
+        if add_space_before_punct_symbol:
+            punct = "!\"#$%&'()*+, -./:;<=>?@[\]^_`{|}~"
+            #add space before punct
+            line = line.translate(str.maketrans({key: " {0}".format(key) for key in punct}))
+            #remove double spaces
+            line = re.sub('\s{2,}', ' ', line)
+
+        sentences = sent_tokenize(line)
+        output = []
+        for x, sent in enumerate(sentences):
+            sent = sent.split(' ')
+            if x == 0:
+                sent = ['<eos>'] + sent
+
+            #imagine we add a word is this really a sentence
+            #If it's a sentence then sent_tokenize will 
+            #generate two sentences
+            #A bit hacky but it helps in parity with huggingface
+            test_sent = ' '.join(sent + ['the'])
+            if len(sent_tokenize(test_sent)) != 1:
+                sent = sent + ['<eos>']
+
+            output += list(self.convert_to_ids(sent).data.numpy())
+        return output
+
+    def decode(self, ids):
+        words = list(map(lambda x: self.dictionary.idx2word[x], ids))
+        return words
+
     def online_tokenize_with_unks(self, line):
         """ Tokenizes an input sentence, adding unks if needed. """
         all_ids = []
@@ -493,7 +582,7 @@ class SentenceCorpus(object):
             tokens = len(words)
 
         # Tokenize file content
-        ids = torch.LongTensor(tokens)
+        ids = torch.IntTensor(tokens)
         token = 0
         if self.lower:
             for word in words:

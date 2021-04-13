@@ -72,6 +72,21 @@ parser.add_argument('--loss', type=str, default='cross_entropy',
                     choices=['cross_entropy', 'similarity'],
                     help='loss function to use')
 
+# Loss parameters 
+parser.add_argument('--loss', type=str, default='cross_entropy',
+                    choices=['cross_entropy', 'similarity'],
+                    help='loss function to use')
+parser.add_argument('--similarity_file', type=str, default=None,
+                    help='path to pre-compiled similarities')
+parser.add_argument('--neg_sim', action='store_true', 
+                    help='include negative similarities')
+parser.add_argument('--stopword_sim', action='store_false', 
+                    help='include stopword similarities')
+parser.add_argument('--normalize_sim', action='store_true', 
+                    help='normalize similarities')
+parser.add_argument('--N_sim', type=int, default=10, 
+                    help='similarity cohort size')
+
 # Data parameters
 parser.add_argument('--model_file', type=str, default='model.pt',
                     help='path to save the final model')
@@ -103,7 +118,6 @@ parser.add_argument('--single', action='store_true',
                     help='use only a single GPU (even if more are available)')
 parser.add_argument('--multisentence_test', action='store_true',
                     help='treat multiple sentences as a single stream at test time')
-
 parser.add_argument('--adapt', action='store_true',
                     help='adapt model weights during evaluation')
 parser.add_argument('--interact', action='store_true',
@@ -224,10 +238,18 @@ corpus = data.SentenceCorpus(args.data_dir, args.vocab_file, args.test, args.int
                              trainfname=args.trainfname,
                              validfname=args.validfname,
                              testfname=args.testfname, 
+<<<<<<< HEAD
                              embeddingfname='embeddings/wikitext2vec.pkl',
                              fasttext_loc='embeddings/wiki-news-300d-1M.vec',
                              allowOOV=False
                              )
+=======
+                             embeddingfname=None,#'embeddings/wikitext103_2vec.pkl',
+                             fasttext_loc=None,#'embeddings/wiki-news-300d-1M.vec',
+                             allowOOV=False
+                             )
+
+>>>>>>> sim
 
 
 sys.exit(1)
@@ -257,7 +279,11 @@ if not args.test and not args.interact:
     else:
         ntokens = len(corpus.dictionary)
         #if i've already loaded embeddings let's just use that
+<<<<<<< HEAD
         if corpus.dictionary.embeddings is not None:
+=======
+        if not(corpus.dictionary.embeddings is None or corpus.dictionary.embeddings == []):
+>>>>>>> sim
             if not args.freeze_embedding:
                 args.freeze_embedding = True
                 sys.stderr.write('WARNING: You did not use --freeze_embedding.'\
@@ -295,6 +321,7 @@ if args.loss == 'cross_entropy':
 
 if args.loss == 'similarity':
 
+<<<<<<< HEAD
     assert len(corpus.dictionary.embeddings) != 0, "You don't have embeddings for your vocab"
 
 
@@ -357,16 +384,77 @@ if args.loss == 'similarity':
                     target[t_idx] = sims[w_i]
 
             similarities.append(target)
+=======
+    if args.similarity_file is None:
+        sys.stderr.write('You need to specify a similarity_file name to use the similarity loss.\n')
+        sys.exit(1)
+
+    #Get all pairwise similarities and save
+    if not os.path.exists(args.similarity_file):
+        sys.stderr.write('Getting new similarities...\n')
+
+        similarities = []
+
+        EMBEDDINGS = model.encoder(torch.LongTensor([w for w in range(model.encoder.num_embeddings)]).to(device))
+        print(EMBEDDINGS.shape)
+
+        if PROGRESS:
+            bar = Bar('Processing Similarity', max = EMBEDDINGS.shape[0])
+
+        for i in range(EMBEDDINGS.shape[0]):
+            sims = torch.nn.functional.cosine_similarity(EMBEDDINGS[i].expand_as(EMBEDDINGS), EMBEDDINGS)
+            similarities.append(sims)
+>>>>>>> sim
                     
             if PROGRESS:
                 bar.next()
 
+<<<<<<< HEAD
         with open(similarity_loc, 'wb') as f:
             dill.dump(similarities, f)
 
     #Get loss
     criterion = WeightedCrossEntropyLoss(EMBEDDINGS, device, similarities)
 
+=======
+        with open(args.similarity_file, 'wb') as f:
+            dill.dump(similarities, f)
+
+    sys.stderr.write('Loading similarities (and apply transformations)...\n')
+    #Load similarities 
+    with open(args.similarity_file, 'rb') as f:
+        similarities = dill.load(f)
+
+    #Apply filters
+    print('neg_sim', args.neg_sim)
+    print('stopword_sim', args.stopword_sim)
+    print('normalize_sim', args.normalize_sim)
+    print('N_sim', args.N_sim)
+
+    stop_idx = []
+    if args.stopword_sim:
+        #load stopwords
+        with open('stopwords.txt', 'r') as f:
+            stop_words = f.read().splitlines()
+        stop_idx = [corpus.dictionary.word2idx[w] for w in stop_words if w in corpus.dictionary.word2idx]
+
+    for i in range(len(similarities)):
+        if not args.neg_sim:
+            torch.nn.functional.relu(similarities[i], inplace=True)
+        mask = torch.zeros(similarities[i].shape, dtype=torch.uint8).to(device)
+        if i in stop_idx:
+            mask[i] = 1
+        else:
+            topN = torch.topk(similarities[i], args.N_sim)
+            mask.scatter_(0, topN.indices.to(device), 1)
+        mask = mask.bool()
+        similarities[i][~mask] = 0
+        if args.normalize_sim:
+            similarities[i] = similarities[i]/torch.sum(similarities[i])
+
+    #Get loss
+    criterion = WeightedCrossEntropyLoss(device, similarities)
+>>>>>>> sim
 
 ###############################################################################
 # Complexity measures
@@ -558,8 +646,12 @@ def test_evaluate(test_sentences, data_source):
                 target = targets[word_index].unsqueeze(0)
                 output, hidden = model(word_input, hidden)
                 output_flat = output.view(-1, ntokens)
+<<<<<<< HEAD
                 loss = criterion(output_flat, target)
                 sys.exit(1)
+=======
+                loss = criterion(output_flat, target.long())
+>>>>>>> sim
                 total_loss += loss.item()
                 input_word = corpus.dictionary.idx2word[int(word_input.data)]
                 targ_word = corpus.dictionary.idx2word[int(target.data)]
@@ -591,7 +683,11 @@ def test_evaluate(test_sentences, data_source):
                 print("Vocabulary Error! Most likely there weren't unks in training and unks are now needed for testing")
                 raise
 
+<<<<<<< HEAD
             loss = criterion(output_flat, targets)
+=======
+            loss = criterion(output_flat, targets.long())
+>>>>>>> sim
             total_loss += loss.item()
             if args.words:
                 # output word-level complexity metrics
@@ -636,7 +732,7 @@ def evaluate(data_source):
             data, targets = get_batch(data_source, i)
             output, hidden = model(data, hidden)
             output_flat = output.view(-1, ntokens)
-            total_loss += len(data) * criterion(output_flat, targets).item()
+            total_loss += len(data) * criterion(output_flat, targets.long()).item()
             hidden = repackage_hidden(hidden)
     return total_loss / len(data_source)
 
@@ -655,7 +751,7 @@ def train():
         hidden = repackage_hidden(hidden)
         model.zero_grad()
         output, hidden = model(data, hidden)
-        loss = criterion(output.view(-1, ntokens), targets)
+        loss = criterion(output.view(-1, ntokens), targets.long())
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.

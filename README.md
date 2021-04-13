@@ -1,19 +1,15 @@
 # Neural complexity
 A neural language model that computes various information-theoretic processing complexity measures (e.g., surprisal) for each word given the preceding context. Also, it can function as an adaptive language model ([van Schijndel and Linzen, 2018](http://aclweb.org/anthology/D18-1499)) which adapts to test domains.
 
+**Note**: Recent updates remove dependencies but break compatibility with pre-2021 models. To use older models, use version 1.1.0: `git checkout tags/v1.1.0`
+
 ### Dependencies
 Requires the following python packages (available through pip):
-* [pytorch](https://pytorch.org/) v1.0.0
-* nltk
+* [pytorch](https://pytorch.org/)
 
 The following python packages are optional:
 * progress
 * dill (to handle binarized vocabularies)
-
-Requires the `punkt` nltk module. Install it from within python:
-
-    import nltk
-    nltk.download('punkt')  
 
 ### Quick Usage
 The below all use GPUs. To use CPUs instead, omit the `--cuda` flag.
@@ -38,6 +34,10 @@ Take the above trained Wikitext-2 LSTM and adapt it to `adaptation_set.txt` in `
 To freeze the weights of the adaptive model and evaluate it on `heldout_set.txt` in `data/adaptivecorpus`:
 
     time python main.py --model_file 'adapted_model.pt' --vocab_file 'wiki_2_vocab.txt' --cuda --data_dir './data/adaptivecorpus/' --testfname 'heldout_set.txt' --test --words > FILENAME.OUTPUT
+
+### Quick Usage (Language Modeling with Similarity Loss)
+
+    time python main.py --model_file 'wiki_103_model_similarity.pt' --vocab_file 'wikitext_103_vocab' --tied --cuda --data_dir './wikitext-103/' --trainfname 'wiki.train.tokens' --validfname 'wiki.valid.tokens' --epochs 2  --loss similarity --emsize 300 --nhid 300 --seed 23 --embedding_file 'embeddings_wikitext_103_vocab' --similarity_file 'embeddings/full_wikitext_103_similarities.pkl'
 
 ## Features
 * Outputs incremental word-by-word information-theoretic complexity estimates (i.e. surprisal, entropy, entropy reduction) if the runtime command `--words` is given.
