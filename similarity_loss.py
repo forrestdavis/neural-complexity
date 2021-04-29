@@ -71,7 +71,7 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
 
 
 
-    def get_cohort(self, embeddings):
+    def get_cohort(self, embeddings, token_id=287):
 
         with torch.no_grad():
             #Get cosine similarities
@@ -106,4 +106,4 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
 
         top = torch.topk(similarities, 10, dim=1)
 
-        return top.values[2304], top.indices[2304]
+        return top.values[token_id], top.indices[token_id]
