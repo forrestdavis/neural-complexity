@@ -16,24 +16,94 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
         embeddings (torch.FloatTensor): pre-trained word embeddings
         device: device to use
     """
-    def __init__(self, device, similarities=None, embeddings=None):
+    def __init__(self, similarities=None, neg_sim=False, 
+            normalize_sim=True, N_sim=2, stop_idx=torch.tensor([])):
         super().__init__()
 
-        #not using presaved
         if similarities is None:
-            voc_size = embeddings.shape[0]
+            self.similarities = None
+        else:
+            self.similarities = similarities
+        self.stop_idx = stop_idx
+        self.N_sim = N_sim
+        self.neg_sim = neg_sim
+        self.normalize_sim=normalize_sim
 
-            # Compute similarities
-            print("Computing word similarities...")
-            similarities = []
-            for i in range(voc_size):
-                similarities.append(torch.nn.functional.cosine_similarity(embeddings[i].expand_as(embeddings), embeddings))
+    def forward(self, output, targets, embeddings=None):
 
-        similarities = torch.stack(similarities).to(device)
-        self.similarities = similarities
+        if self.similarities is None:
+            with torch.no_grad():
+                #Get cosine similarities
+                NORM = torch.norm(embeddings, dim=1)
+                denom = torch.einsum('i,j', NORM, NORM)
+                similarities = torch.einsum('ij,kj -> ik', embeddings, embeddings)
+                similarities.div_(NORM)
 
-    def forward(self, output, targets):
+                #Free up the memory
+                del(NORM)
+                del(denom)
+
+                #Clip
+                if not self.neg_sim:
+                    torch.nn.functional.relu(similarities, inplace=True)
+
+                #If ignoring stop words
+                if self.stop_idx.shape[0] != 0:
+                    similarities[self.stop_idx,:] = 0
+                    similarities[self.stop_idx,self.stop_idx]=1
+
+                #TOP N
+                mask = torch.zeros(similarities.shape, dtype=torch.uint8).to(embeddings.device)
+                mask.scatter_(1, torch.topk(similarities, self.N_sim, dim=1).indices.to(embeddings.device), 1)
+                similarities.mul_(mask)
+
+                del(mask)
+
+                #Normalize by row
+                if self.normalize_sim:
+                    similarities.div_(torch.sum(similarities, dim=1, keepdim=True))
+        else:
+            similarities = self.similarities
+
         log_probs = torch.nn.functional.log_softmax(output, dim=1)
-        loss = torch.mean(torch.sum(-log_probs*self.similarities[targets], 1))
+        loss = torch.mean(torch.sum(-log_probs*similarities[targets], 1))
         return loss
 
+
+
+    def get_cohort(self, embeddings):
+
+        with torch.no_grad():
+            #Get cosine similarities
+            NORM = torch.norm(embeddings, dim=1)
+            denom = torch.einsum('i,j', NORM, NORM)
+            similarities = torch.einsum('ij,kj -> ik', embeddings, embeddings)
+            similarities.div_(NORM)
+
+            #Free up the memory
+            del(NORM)
+            del(denom)
+
+            #Clip
+            if not self.neg_sim:
+                torch.nn.functional.relu(similarities, inplace=True)
+
+            #If ignoring stop words
+            if self.stop_idx.shape[0] != 0:
+                similarities[self.stop_idx,:] = 0
+                similarities[self.stop_idx,self.stop_idx]=1
+
+            #TOP N
+            mask = torch.zeros(similarities.shape, dtype=torch.uint8).to(embeddings.device)
+            mask.scatter_(1, torch.topk(similarities, self.N_sim, dim=1).indices.to(embeddings.device), 1)
+            similarities.mul_(mask)
+
+            del(mask)
+
+            #Normalize by row
+            if self.normalize_sim:
+                similarities.div_(torch.sum(similarities, dim=1, keepdim=True))
+
+        top = torch.topk(similarities, 10, dim=1)
+
+        return top.values[2304], top.indices[2304]

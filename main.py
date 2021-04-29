@@ -191,7 +191,6 @@ if torch.cuda.is_available():
 
 device = torch.device("cuda" if args.cuda else "cpu")
 
-
 ###############################################################################
 # Load data
 ###############################################################################
@@ -296,6 +295,7 @@ if not args.test and not args.interact:
     # this makes them a continuous chunk, and will speed up forward pass
     model.rnn.flatten_parameters()
 
+
 ###############################################################################
 # Set Loss
 ###############################################################################
@@ -305,43 +305,6 @@ if args.loss == 'cross_entropy':
 
 if args.loss == 'similarity':
 
-    if args.similarity_file is None:
-        sys.stderr.write('You need to specify a similarity_file name to use the similarity loss.\n')
-        sys.exit(1)
-
-    #Get all pairwise similarities and save
-    if not os.path.exists(args.similarity_file):
-        sys.stderr.write('Getting new similarities...\n')
-
-        similarities = []
-
-        EMBEDDINGS = model.encoder(torch.LongTensor([w for w in range(model.encoder.num_embeddings)]).to(device))
-        print(EMBEDDINGS.shape)
-
-        if PROGRESS:
-            bar = Bar('Processing Similarity', max = EMBEDDINGS.shape[0])
-
-        for i in range(EMBEDDINGS.shape[0]):
-            sims = torch.nn.functional.cosine_similarity(EMBEDDINGS[i].expand_as(EMBEDDINGS), EMBEDDINGS)
-            similarities.append(sims)
-                    
-            if PROGRESS:
-                bar.next()
-
-        with open(args.similarity_file, 'wb') as f:
-            dill.dump(similarities, f)
-
-    sys.stderr.write('Loading similarities (and apply transformations)...\n')
-    #Load similarities 
-    with open(args.similarity_file, 'rb') as f:
-        similarities = dill.load(f)
-
-    #Apply filters
-    print('neg_sim', args.neg_sim)
-    print('stopword_sim', args.stopword_sim)
-    print('normalize_sim', args.normalize_sim)
-    print('N_sim', args.N_sim)
-
     stop_idx = []
     if args.stopword_sim:
         #load stopwords
@@ -349,22 +312,63 @@ if args.loss == 'similarity':
             stop_words = f.read().splitlines()
         stop_idx = [corpus.dictionary.word2idx[w] for w in stop_words if w in corpus.dictionary.word2idx]
 
-    for i in range(len(similarities)):
-        if not args.neg_sim:
-            torch.nn.functional.relu(similarities[i], inplace=True)
-        mask = torch.zeros(similarities[i].shape, dtype=torch.uint8).to(device)
-        if i in stop_idx:
-            mask[i] = 1
-        else:
-            topN = torch.topk(similarities[i], args.N_sim)
-            mask.scatter_(0, topN.indices.to(device), 1)
-        mask = mask.bool()
-        similarities[i][~mask] = 0
-        if args.normalize_sim:
-            similarities[i] = similarities[i]/torch.sum(similarities[i])
+    stop_idx = torch.tensor(stop_idx)
+
+    if args.similarity_file is None:
+        similarities = None
+    else:
+        #Get all pairwise similarities and save
+        if not os.path.exists(args.similarity_file):
+            sys.stderr.write('Getting new similarities...\n')
+
+            similarities = []
+
+            EMBEDDINGS = model.encoder(torch.LongTensor([w for w in range(model.encoder.num_embeddings)]).to(device))
+
+            if PROGRESS:
+                bar = Bar('Processing Similarity', max = EMBEDDINGS.shape[0])
+
+            for i in range(EMBEDDINGS.shape[0]):
+                sims = torch.nn.functional.cosine_similarity(EMBEDDINGS[i].expand_as(EMBEDDINGS), EMBEDDINGS)
+                similarities.append(sims)
+                        
+                if PROGRESS:
+                    bar.next()
+
+            with open(args.similarity_file, 'wb') as f:
+                dill.dump(similarities, f)
+
+        sys.stderr.write('Loading similarities (and apply transformations)...\n')
+        #Load similarities 
+        with open(args.similarity_file, 'rb') as f:
+            similarities = dill.load(f)
+
+        #Apply filters
+        print('neg_sim', args.neg_sim)
+        print('stopword_sim', args.stopword_sim)
+        print('normalize_sim', args.normalize_sim)
+        print('N_sim', args.N_sim)
+
+        for i in range(len(similarities)):
+            if not args.neg_sim:
+                torch.nn.functional.relu(similarities[i], inplace=True)
+            mask = torch.zeros(similarities[i].shape, dtype=torch.uint8).to(device)
+            if i in stop_idx:
+                mask[i] = 1
+            else:
+                topN = torch.topk(similarities[i], args.N_sim)
+                mask.scatter_(0, topN.indices.to(device), 1)
+            mask = mask.bool()
+            similarities[i][~mask] = 0
+            if args.normalize_sim:
+                similarities[i] = similarities[i]/torch.sum(similarities[i])
+
+        similarities = torch.stack(similarities).to(device)
 
     #Get loss
-    criterion = WeightedCrossEntropyLoss(device, similarities)
+    criterion = WeightedCrossEntropyLoss(similarities, 
+            args.neg_sim, args.normalize_sim, args.N_sim, 
+            stop_idx)
 
 ###############################################################################
 # Complexity measures
@@ -556,7 +560,10 @@ def test_evaluate(test_sentences, data_source):
                 target = targets[word_index].unsqueeze(0)
                 output, hidden = model(word_input, hidden)
                 output_flat = output.view(-1, ntokens)
-                loss = criterion(output_flat, target.long())
+                if args.loss == 'similarity':
+                    loss = criterion(output_flat, targets.long(), model.encoder.weight)
+                else:
+                    loss = criterion(output_flat, targets.long())
                 total_loss += loss.item()
                 input_word = corpus.dictionary.idx2word[int(word_input.data)]
                 targ_word = corpus.dictionary.idx2word[int(target.data)]
@@ -588,7 +595,10 @@ def test_evaluate(test_sentences, data_source):
                 print("Vocabulary Error! Most likely there weren't unks in training and unks are now needed for testing")
                 raise
 
-            loss = criterion(output_flat, targets.long())
+            if args.loss == 'similarity':
+                loss = criterion(output_flat, targets.long(), model.encoder.weight)
+            else:
+                loss = criterion(output_flat, targets.long())
             total_loss += loss.item()
             if args.words:
                 # output word-level complexity metrics
@@ -633,7 +643,11 @@ def evaluate(data_source):
             data, targets = get_batch(data_source, i)
             output, hidden = model(data, hidden)
             output_flat = output.view(-1, ntokens)
-            total_loss += len(data) * criterion(output_flat, targets.long()).item()
+            if args.loss == 'similarity':
+                total_loss += len(data)*criterion(output_flat, targets.long(), 
+                        model.encoder.weight).item()
+            else:
+                total_loss += len(data) * criterion(output_flat, targets.long()).item()
             hidden = repackage_hidden(hidden)
     return total_loss / len(data_source)
 
@@ -652,7 +666,10 @@ def train():
         hidden = repackage_hidden(hidden)
         model.zero_grad()
         output, hidden = model(data, hidden)
-        loss = criterion(output.view(-1, ntokens), targets.long())
+        if args.loss == 'similarity':
+            loss = criterion(output.view(-1, ntokens), targets.long(), model.encoder.weight)
+        else:
+            loss = criterion(output.view(-1, ntokens), targets.long())
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -693,6 +710,9 @@ if not args.test and not args.interact:
             epoch_start_time = time.time()
             train()
             val_loss = evaluate(val_data)
+            top_values, top_indices = criterion.get_cohort(model.encoder.weight)
+            for top_value, top_index in zip(top_values, top_indices):
+                print(corpus.dictionary.idx2word[top_index.data], top_value.data)
 
             #to catch huge loss from semantic similarity loss which causes initial overflow problems
             try: 
