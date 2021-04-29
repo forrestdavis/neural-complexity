@@ -104,7 +104,7 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
         with torch.no_grad():
 
             #Get cosine similarities
-            similarities = chunked_pairwise_cosine_similarity(embeddings)
+            similarities = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
 
             #Clip
             if not self.neg_sim:
