@@ -1,30 +1,38 @@
 import torch
 
-def chunked_pairwise_cosine_similarity(x1, x2=None, eps=1e-8, MAXIMUM_SIZE=10000):
+def chunked_pairwise_cosine_similarity(x1, x2=None, eps=1e-8, MAXIMUM_SIZE=33000):
     x1.half()
-    return_tensor = torch.zeros(x1.shape).half()
 
-    #chunk_size = torch.remainder(x1.shape, torch.tensor(MAXIMUM_SIZE))
-    x1_chunks = list(torch.split(x1, MAXIMUM_SIZE))
-    x2 = x1 if x2 is None else x2
-    w1 = x1.norm(p=2, dim=1, keepdim=True).half()
-    w1_chunks = list(torch.split(w1, MAXIMUM_SIZE))
-    w2 = w1 if x2 is x1 else x2.norm(p=2, dim=1, keepdim=True).half()
+    if x1.shape[0] > MAXIMUM_SIZE:
+        return_tensor = torch.zeros((x1.shape[0], x1.shape[0])).half().to(x1.device)
 
-    del(x1)
-    del(w1)
+        #chunk_size = torch.remainder(x1.shape, torch.tensor(MAXIMUM_SIZE))
+        x1_chunks = list(torch.split(x1, MAXIMUM_SIZE))
+        x2 = x1 if x2 is None else x2
+        w1 = x1.norm(p=2, dim=1, keepdim=True).half()
+        w1_chunks = list(torch.split(w1, MAXIMUM_SIZE))
+        w2 = w1 if x2 is x1 else x2.norm(p=2, dim=1, keepdim=True).half()
 
-    start_idx = 0
-    while x1_chunks:
-        x1_chunk = x1_chunks.pop(0)
-        w1_chunk = w1_chunks.pop(0)
-        end_idx = start_idx + x1_chunk.shape[0]
-        return_tensor[start_idx:end_idx] = torch.mm(x1_chunk, x2.t())/(w1_chunk*w2.t()).clamp(min=eps)
-        start_idx = end_idx
-        del(x1_chunk)
-        del(w1_chunk)
+        del(x1)
+        del(w1)
 
-    return return_tensor
+        start_idx = 0
+        while x1_chunks:
+            x1_chunk = x1_chunks.pop(0)
+            w1_chunk = w1_chunks.pop(0)
+            end_idx = start_idx + x1_chunk.shape[0]
+            return_tensor[start_idx:end_idx] = torch.mm(x1_chunk, x2.t())/(w1_chunk*w2.t()).clamp(min=eps)
+            start_idx = end_idx
+            del(x1_chunk)
+            del(w1_chunk)
+        return return_tensor
+
+    else:
+        x1.half()
+        x2 = x1 if x2 is None else x2
+        w1 = x1.norm(p=2, dim=1, keepdim=True).half()
+        w2 = w1 if x2 is x1 else x2.norm(p=2, dim=1, keepdim=True).half()
+        return torch.mm(x1, x2.t()) / (w1 * w2.t()).clamp(min=eps)
 
 #Slightly modified from 
 #Kovaleva et al. (2018) 'Similarity-Based Reconstruction Loss for Meaning Representation'
@@ -61,7 +69,7 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
             with torch.no_grad():
 
                 #Get cosine similarities
-                similarities = chunked_pairwise_cosine_similarity(embeddings)
+                similarities = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
 
                 #Clip
                 if not self.neg_sim:
