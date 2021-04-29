@@ -165,9 +165,11 @@ class SentenceCorpus(object):
             else:
                 self.dictionary = Dictionary(embeddingfname, fasttext_loc, allowOOV)
                 self.load_dict(vocab_file)
+                '''
                 if not os.path.exists('embeddings_'+vocab_file) and not interact_flag:
                     self.dictionary.match_embeddings()
                     self.save_dict(vocab_file)
+                '''
             if test_flag:
                 # test mode
                 if multisentence_test_flag:
