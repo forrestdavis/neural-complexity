@@ -1,5 +1,31 @@
 import torch
 
+def chunked_pairwise_cosine_similarity(x1, x2=None, eps=1e-8, MAXIMUM_SIZE=10000):
+    x1.half()
+    return_tensor = torch.zeros(x1.shape).half()
+
+    #chunk_size = torch.remainder(x1.shape, torch.tensor(MAXIMUM_SIZE))
+    x1_chunks = list(torch.split(x1, MAXIMUM_SIZE))
+    x2 = x1 if x2 is None else x2
+    w1 = x1.norm(p=2, dim=1, keepdim=True).half()
+    w1_chunks = list(torch.split(w1, MAXIMUM_SIZE))
+    w2 = w1 if x2 is x1 else x2.norm(p=2, dim=1, keepdim=True).half()
+
+    del(x1)
+    del(w1)
+
+    start_idx = 0
+    while x1_chunks:
+        x1_chunk = x1_chunks.pop(0)
+        w1_chunk = w1_chunks.pop(0)
+        end_idx = start_idx + x1_chunk.shape[0]
+        return_tensor[start_idx:end_idx] = torch.mm(x1_chunk, x2.t())/(w1_chunk*w2.t()).clamp(min=eps)
+        start_idx = end_idx
+        del(x1_chunk)
+        del(w1_chunk)
+
+    return return_tensor
+
 #Slightly modified from 
 #Kovaleva et al. (2018) 'Similarity-Based Reconstruction Loss for Meaning Representation'
 #paper link: https://www.aclweb.org/anthology/D18-1525/
@@ -33,15 +59,9 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
 
         if self.similarities is None:
             with torch.no_grad():
-                #Get cosine similarities using half precision to save GPU memory
-                NORM = torch.norm(embeddings, dim=1).half()
-                denom = torch.einsum('i,j', NORM, NORM).half()
-                similarities = torch.einsum('ij,kj -> ik', embeddings, embeddings).half()
-                similarities.div_(NORM)
 
-                #Free up the memory
-                del(NORM)
-                del(denom)
+                #Get cosine similarities
+                similarities = chunked_pairwise_cosine_similarity(embeddings)
 
                 #Clip
                 if not self.neg_sim:
@@ -74,15 +94,9 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
     def get_cohort(self, embeddings, token_id=287):
 
         with torch.no_grad():
-            #Get cosine similarities
-            NORM = torch.norm(embeddings, dim=1)
-            denom = torch.einsum('i,j', NORM, NORM)
-            similarities = torch.einsum('ij,kj -> ik', embeddings, embeddings)
-            similarities.div_(NORM)
 
-            #Free up the memory
-            del(NORM)
-            del(denom)
+            #Get cosine similarities
+            similarities = chunked_pairwise_cosine_similarity(embeddings)
 
             #Clip
             if not self.neg_sim:
