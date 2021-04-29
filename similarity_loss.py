@@ -33,10 +33,10 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
 
         if self.similarities is None:
             with torch.no_grad():
-                #Get cosine similarities
-                NORM = torch.norm(embeddings, dim=1)
-                denom = torch.einsum('i,j', NORM, NORM)
-                similarities = torch.einsum('ij,kj -> ik', embeddings, embeddings)
+                #Get cosine similarities using half precision to save GPU memory
+                NORM = torch.norm(embeddings, dim=1).half()
+                denom = torch.einsum('i,j', NORM, NORM).half()
+                similarities = torch.einsum('ij,kj -> ik', embeddings, embeddings).half()
                 similarities.div_(NORM)
 
                 #Free up the memory
