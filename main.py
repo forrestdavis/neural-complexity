@@ -710,9 +710,11 @@ if not args.test and not args.interact:
             epoch_start_time = time.time()
             train()
             val_loss = evaluate(val_data)
-            top_values, top_indices = criterion.get_cohort(model.encoder.weight, corpus.dictionary.word2idx['man'])
-            for top_value, top_index in zip(top_values, top_indices):
-                print(corpus.dictionary.idx2word[top_index.data], top_value.data)
+
+            if args.loss == 'similarity':
+                top_values, top_indices = criterion.get_cohort(model.encoder.weight, corpus.dictionary.word2idx['man'])
+                for top_value, top_index in zip(top_values, top_indices):
+                    print(corpus.dictionary.idx2word[top_index.data], top_value.data)
 
             #to catch huge loss from semantic similarity loss which causes initial overflow problems
             try: 
