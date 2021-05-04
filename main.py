@@ -69,7 +69,7 @@ parser.add_argument('--cuda', action='store_true',
 parser.add_argument('--init', type=float, default=None,
                     help='-1 to randomly Initialize. Otherwise, all parameter weights set to value')
 
-#added for checkpointing that maintains epoch, model weights, optimizer state
+#added for checkpointing that maintains epoch, model weights, lr
 parser.add_argument('--with_checkpoints', action='store_true',
                     help='while training saves state after last epoch for restarting training')
 
@@ -232,10 +232,11 @@ except FileNotFoundError:
 ###Look for existing checkpoint file, if applicable (I'm bootstrapping the the original 
 #checkpoint flag, not sure what it's for though)
 
-checkpoint_file = args.model_file.split('.pt')[0]+'_checkpoint.tar'
+if args.with_checkpoints:
+    checkpoint_file = args.model_file.split('.pt')[0]+'_checkpoint.tar'
 
-if os.path.exists(checkpoint_file):
-    args.load_checkpoint = True
+    if os.path.exists(checkpoint_file):
+        args.load_checkpoint = True
 
 corpus = data.SentenceCorpus(args.data_dir, args.vocab_file, args.test, args.interact,
                              checkpoint_flag=args.load_checkpoint,
@@ -286,14 +287,15 @@ if not args.test and not args.interact:
                 model = torch.load(f, map_location='cpu')
 
     elif args.with_checkpoints and os.path.exists(checkpoint_file):
+        ntokens = len(corpus.dictionary)
         model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
                                args.nlayers, embedding_file=args.embedding_file,
                                dropout=args.dropout, tie_weights=args.tied,
                                freeze_embedding=args.freeze_embedding).to(device)
         #load checkpoint
         checkpoint = torch.load(checkpoint_file)
-        model.load_state_dict(checkpopint['model_state_dict'])
-        start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['model_state_dict'])
+        start_epoch = checkpoint['epoch']+1
         lr = checkpoint['lr']
         best_val_loss = checkpoint['best_val_loss']
         no_improvement = checkpoint['no_improvement']
