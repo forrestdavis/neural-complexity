@@ -69,6 +69,10 @@ parser.add_argument('--cuda', action='store_true',
 parser.add_argument('--init', type=float, default=None,
                     help='-1 to randomly Initialize. Otherwise, all parameter weights set to value')
 
+#added for checkpointing that maintains epoch, model weights, optimizer state
+parser.add_argument('--with_checkpoints', action='store_true',
+                    help='while training saves state after last epoch for restarting training')
+
 # Loss parameters 
 parser.add_argument('--loss', type=str, default='cross_entropy',
                     choices=['cross_entropy', 'similarity'],
@@ -225,6 +229,14 @@ except FileNotFoundError:
     # We should create a new vocab file
     args.predefined_vocab_flag = False
 
+###Look for existing checkpoint file, if applicable (I'm bootstrapping the the original 
+#checkpoint flag, not sure what it's for though)
+
+checkpoint_file = args.model_file.split('.pt')[0]+'_checkpoint.tar'
+
+if os.path.exists(checkpoint_file):
+    args.load_checkpoint = True
+
 corpus = data.SentenceCorpus(args.data_dir, args.vocab_file, args.test, args.interact,
                              checkpoint_flag=args.load_checkpoint,
                              predefined_vocab_flag=args.predefined_vocab_flag,
@@ -254,8 +266,17 @@ if not args.interact:
 # Build/load the model
 ###############################################################################
 
+#this helps with checkpointing
+start_epoch = 1
+#EPOCH SETTING
+# Loop over epochs.
+lr = args.lr
+best_val_loss = None
+no_improvement = 0
+
+
 if not args.test and not args.interact:
-    if args.load_checkpoint:
+    if args.load_checkpoint and not args.with_checkpoints:
         # Load the best saved model.
         print('  Continuing training from previous checkpoint')
         with open(args.model_file, 'rb') as f:
@@ -263,6 +284,21 @@ if not args.test and not args.interact:
                 model = torch.load(f).to(device)
             else:
                 model = torch.load(f, map_location='cpu')
+
+    elif args.with_checkpoints and os.path.exists(checkpoint_file):
+        model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
+                               args.nlayers, embedding_file=args.embedding_file,
+                               dropout=args.dropout, tie_weights=args.tied,
+                               freeze_embedding=args.freeze_embedding).to(device)
+        #load checkpoint
+        checkpoint = torch.load(checkpoint_file)
+        model.load_state_dict(checkpopint['model_state_dict'])
+        start_epoch = checkpoint['epoch']
+        lr = checkpoint['lr']
+        best_val_loss = checkpoint['best_val_loss']
+        no_improvement = checkpoint['no_improvement']
+
+
     else:
         ntokens = len(corpus.dictionary)
         #if i've already loaded embeddings let's just use that
@@ -698,15 +734,12 @@ def train():
             total_loss = 0.
             start_time = time.time()
 
-# Loop over epochs.
-lr = args.lr
-best_val_loss = None
-no_improvement = 0
 
 # At any point you can hit Ctrl + C to break out of training early.
 if not args.test and not args.interact:
     try:
-        for epoch in range(1, args.epochs+1):
+
+        for epoch in range(start_epoch, args.epochs+1):
             epoch_start_time = time.time()
             train()
             val_loss = evaluate(val_data)
@@ -740,6 +773,15 @@ if not args.test and not args.interact:
                     print('Covergence achieved! Ending training early')
                     break
                 lr /= 4.0
+
+            #save checkpoint 
+            if args.with_checkpoints:
+                torch.save({'epoch': epoch, 
+                    'model_state_dict': model.state_dict(),
+                    'lr': lr, 
+                    'no_improvement': no_improvement, 
+                    'best_val_loss': best_val_loss}, checkpoint_file)
+                
     except KeyboardInterrupt:
         print('-' * 89)
         print('Exiting from training early')

@@ -8,6 +8,7 @@ import numpy as np
 import dill
 import re
 
+
 re_sentend = re.compile(r'(?<!\b[A-Z]\.)(?<!\b[Mm]rs\.)(?<!\b[MmDdSsJj]r\.)(?<=[\.\?\!])[ \n\t](?!["\'])|(?<!\b[A-Z]\.)(?<!\b[Mm]rs\.)(?<!\b[MmDdSsJj]r\.)(?<=[\.\?\!] ["\'])[ \n\t]+')
 
 def sent_tokenize(instr):
@@ -140,6 +141,10 @@ class SentenceCorpus(object):
                  embeddingfname = None, 
                  fasttext_loc = None, 
                  allowOOV=False):
+
+        #for parity with pipeline using hugging face transformers (setting maximum input length)
+        self.model_max_length = int(1e30)
+
         self.lower = lower_flag
         self.collapse_nums = collapse_nums_flag
         if not (test_flag or interact_flag or checkpoint_flag or predefined_vocab_flag or generate_flag):
@@ -486,15 +491,40 @@ class SentenceCorpus(object):
                         all_ids.append(ids)
         return (sents, all_ids)
 
-    def encode(self, line, add_space_before_punct_symbol=False, lower=True):
+
+    #This is supposed to loosely parallel hugging face's transformers
+    #encoder...
+    def __call__(self, line, return_tensors=None):
+
+        if return_tensors=='pt':
+            return {'input_ids': torch.tensor(self.encode(line), dtype=torch.int64).unsqueeze(0), 
+                    'attention_mask': torch.tensor([])}
+        elif return_tensors is None:
+            return {'input_ids': self.encode(line), 
+                    'attention_mask': []}
+        else:
+            sys.stderr.write('I have not implemented a return_tensors type: '+str(return_tensors)+'\n')
+            sys.exit(1)
+
+    def encode(self, line, add_space_before_punct_symbol=True, lower=True,
+            remove_trailing_spaces=True):
 
         if lower:
             line = line.lower()
 
+        if remove_trailing_spaces:
+            line = line.strip()
+
         if add_space_before_punct_symbol:
-            punct = "!\"#$%&'()*+, -./:;<=>?@[\]^_`{|}~"
+            punct = "!\"#$%&'()*+,./:;-<=>?@[\]^_`{|}~"
             #add space before punct
             line = line.translate(str.maketrans({key: " {0}".format(key) for key in punct}))
+
+            #break things like "farm-house" into "farm - house" and "and/or" into "and / or" careful here
+            punct = "/-"
+            #add space before punct
+            line = line.translate(str.maketrans({key: "{0} ".format(key) for key in punct}))
+
             #remove double spaces
             line = re.sub('\s{2,}', ' ', line)
 
@@ -515,6 +545,9 @@ class SentenceCorpus(object):
 
             output += list(self.convert_to_ids(sent).data.numpy())
         return output
+
+    def convert_ids_to_tokens(self, ids):
+        return self.decode(ids)
 
     def decode(self, ids):
         words = list(map(lambda x: self.dictionary.idx2word[x], ids))

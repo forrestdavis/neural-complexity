@@ -123,9 +123,9 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
             del(mask)
 
             #Normalize by row
-            if self.normalize_sim:
-                similarities.div_(torch.sum(similarities, dim=1, keepdim=True))
+            #if self.normalize_sim:
+            #    similarities.div_(torch.sum(similarities, dim=1, keepdim=True))
 
-        top = torch.topk(similarities, 10, dim=1)
+        top = torch.topk(similarities, self.N_sim, dim=1)
 
         return top.values[token_id], top.indices[token_id]
