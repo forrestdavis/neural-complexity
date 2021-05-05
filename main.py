@@ -16,7 +16,7 @@ import torch.nn as nn
 import numpy as np
 import data
 import model
-from similarity_loss import WeightedCrossEntropyLoss
+from similarity_loss import WeightedCrossEntropyLoss, chunked_pairwise_cosine_similaritiy
 
 try:
     from progress.bar import Bar
@@ -87,6 +87,8 @@ parser.add_argument('--normalize_sim', action='store_true',
                     help='normalize similarities')
 parser.add_argument('--N_sim', type=int, default=10, 
                     help='similarity cohort size')
+parser.add_argument('--space_sim', type=int, default=0, 
+                    help='space out when cohort is generated to speed up training')
 
 # Data parameters
 parser.add_argument('--model_file', type=str, default='model.pt',
@@ -697,6 +699,15 @@ def train():
     start_time = time.time()
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(args.batch_size)
+
+    # Space out cohort generation
+    # always generate cohort at start of epoch
+    #TODO: THINK ABOUT HOW TO FACTOR THIS OUT
+    if args.loss == 'similarity' and args.space_sim > 0:
+        cohort = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
+    else:
+        cohort = None
+
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
@@ -705,9 +716,16 @@ def train():
         model.zero_grad()
         output, hidden = model(data, hidden)
         if args.loss == 'similarity':
-            loss = criterion(output.view(-1, ntokens), targets.long(), model.encoder.weight)
+            if args.space_sim > 0:
+                if batch % args.sim_space == 0:
+                    print('Calculating cohort again')
+                    cohort = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
+
+            loss = criterion(output.view(-1, ntokens), targets.long(), 
+                    model.encoder.weight, cohort)
         else:
             loss = criterion(output.view(-1, ntokens), targets.long())
+
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
