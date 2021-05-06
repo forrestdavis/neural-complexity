@@ -16,7 +16,7 @@ import torch.nn as nn
 import numpy as np
 import data
 import model
-from similarity_loss import WeightedCrossEntropyLoss, chunked_pairwise_cosine_similaritiy
+from similarity_loss import WeightedCrossEntropyLoss, chunked_pairwise_cosine_similarity
 
 try:
     from progress.bar import Bar
@@ -348,7 +348,8 @@ if args.loss == 'similarity':
     stop_idx = []
     if args.stopword_sim:
         #load stopwords
-        with open('stopwords.txt', 'r') as f:
+        with open('hand_corrected_stopwords.txt', 'r') as f:
+        #with open('stopwords.txt', 'r') as f:
             stop_words = f.read().splitlines()
         stop_idx = [corpus.dictionary.word2idx[w] for w in stop_words if w in corpus.dictionary.word2idx]
 
@@ -704,7 +705,7 @@ def train():
     # always generate cohort at start of epoch
     #TODO: THINK ABOUT HOW TO FACTOR THIS OUT
     if args.loss == 'similarity' and args.space_sim > 0:
-        cohort = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
+        cohort = chunked_pairwise_cosine_similarity(model.encoder.weight.clone().detach())
     else:
         cohort = None
 
@@ -717,9 +718,9 @@ def train():
         output, hidden = model(data, hidden)
         if args.loss == 'similarity':
             if args.space_sim > 0:
-                if batch % args.sim_space == 0:
+                if batch % args.space_sim == 0:
                     print('Calculating cohort again')
-                    cohort = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
+                    cohort = chunked_pairwise_cosine_similarity(model.encoder.weight.clone().detach())
 
             loss = criterion(output.view(-1, ntokens), targets.long(), 
                     model.encoder.weight, cohort)
