@@ -16,7 +16,7 @@ import torch.nn as nn
 import numpy as np
 import data
 import model
-from similarity_loss import WeightedCrossEntropyLoss, chunked_pairwise_cosine_similarity
+from similarity_loss import WeightedCrossEntropyLoss#, chunked_pairwise_cosine_similarity
 
 try:
     from progress.bar import Bar
@@ -685,8 +685,9 @@ def evaluate(data_source):
             output, hidden = model(data, hidden)
             output_flat = output.view(-1, ntokens)
             if args.loss == 'similarity':
-                total_loss += len(data)*criterion(output_flat, targets.long(), 
-                        model.encoder.weight).item()
+                #total_loss += len(data)*criterion(output_flat, targets.long(), 
+                        #model.encoder.weight).item()
+                total_loss += len(data)*criterion(output_flat, targets.long()).item()
             else:
                 total_loss += len(data) * criterion(output_flat, targets.long()).item()
             hidden = repackage_hidden(hidden)
@@ -701,14 +702,6 @@ def train():
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(args.batch_size)
 
-    # Space out cohort generation
-    # always generate cohort at start of epoch
-    #TODO: THINK ABOUT HOW TO FACTOR THIS OUT
-    if args.loss == 'similarity' and args.space_sim > 0:
-        cohort = chunked_pairwise_cosine_similarity(model.encoder.weight.clone().detach())
-    else:
-        cohort = None
-
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
@@ -717,13 +710,20 @@ def train():
         model.zero_grad()
         output, hidden = model(data, hidden)
         if args.loss == 'similarity':
+            #recalculate similarities on some delayed schedule (always triggered at 
+            #start of epoch)
             if args.space_sim > 0:
-                if batch % args.space_sim == 0:
+                if batch % args.space_sim == 0 and batch != 0:
                     print('Calculating cohort again')
-                    cohort = chunked_pairwise_cosine_similarity(model.encoder.weight.clone().detach())
+                    criterion.set_similarities(model.encoder.weight.clone().detach())
+                #calculate loss
+                loss = criterion(output.view(-1, ntokens), targets.long(), 
+                        model.encoder.weight)
 
-            loss = criterion(output.view(-1, ntokens), targets.long(), 
-                    model.encoder.weight, cohort)
+            #if we aren't delying the similarity calculation recalculate per batch
+            else:
+                loss = criterion(output.view(-1, ntokens), targets.long(), 
+                        model.encoder.weight, True)
         else:
             loss = criterion(output.view(-1, ntokens), targets.long())
 
@@ -763,6 +763,10 @@ if not args.test and not args.interact:
         for epoch in range(start_epoch, args.epochs+1):
             epoch_start_time = time.time()
             train()
+            #recalculate cohort going into next epoch and before
+            #evalute (this will have val loss relative to updated similarities)
+            if args.loss == 'similarity':
+                criterion.set_similarities(model.encoder.weight.clone().detach())
             val_loss = evaluate(val_data)
 
             if args.loss == 'similarity':

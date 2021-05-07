@@ -1,6 +1,7 @@
 import torch
 
 def chunked_pairwise_cosine_similarity(x1, x2=None, eps=1e-8, MAXIMUM_SIZE=33000):
+
     x1.half()
 
     if x1.shape[0] > MAXIMUM_SIZE:
@@ -63,13 +64,47 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
         self.neg_sim = neg_sim
         self.normalize_sim=normalize_sim
 
-    def forward(self, output, targets, embeddings=None, similarities=None):
+    def set_similarities(self, embeddings):
 
-        if self.similarities is None:
+        with torch.no_grad():
+
+            #get similarities
+            similarities = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
+
+            #Clip
+            if not self.neg_sim:
+                torch.nn.functional.relu(similarities, inplace=True)
+
+            #If ignoring stop words
+            if self.stop_idx.shape[0] != 0:
+                similarities[self.stop_idx,:] = 0
+                similarities[self.stop_idx,self.stop_idx]=1
+
+            #TOP N
+            mask = torch.zeros(similarities.shape, dtype=torch.uint8).to(embeddings.device)
+            mask.scatter_(1, torch.topk(similarities, self.N_sim, dim=1).indices.to(embeddings.device), 1)
+            similarities.mul_(mask)
+
+            del(mask)
+
+            #Normalize by row
+            if self.normalize_sim:
+                similarities.div_(torch.sum(similarities, dim=1, keepdim=True))
+
+        self.similarities = similarities
+
+
+    def forward(self, output, targets, embeddings=None, recalculate_similarities=False):#, similarities=None):
+
+        if self.similarities is None or recalculate_similarities:
+            assert embeddings is not None
+            self.set_similarities(embeddings)
+            '''
             with torch.no_grad():
 
                 #Get cosine similarities
                 if similarities is None:
+                    print('calculating similarities')
                     similarities = chunked_pairwise_cosine_similarity(embeddings.clone().detach())
 
                 #Clip
@@ -91,14 +126,14 @@ class WeightedCrossEntropyLoss(torch.nn.Module):
                 #Normalize by row
                 if self.normalize_sim:
                     similarities.div_(torch.sum(similarities, dim=1, keepdim=True))
-        else:
-            similarities = self.similarities
+            '''
+        #else:
+        #    similarities = self.similarities
 
         log_probs = torch.nn.functional.log_softmax(output, dim=1)
-        loss = torch.mean(torch.sum(-log_probs*similarities[targets], 1))
+        #loss = torch.mean(torch.sum(-log_probs*similarities[targets], 1))
+        loss = torch.mean(torch.sum(-log_probs*self.similarities[targets], 1))
         return loss
-
-
 
     def get_cohort(self, embeddings, token_id=287):
 
